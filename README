@@ -1,8 +1,11 @@
 tmsdebug.py:
-	This script runs a server to let you see how openlayers.html sends requests
+	This script runs a server to let you see how openlayers.html sends requests. Run it with IPython or it will finish immediately (or change the code).
+	Server is at http://localhost:8080
 	
 openlayer.html:
-	Sample openlayer page, needs to have the resolutions/extents/zooms modified later
+	Sample openlayer page, needs to have the resolutions/extents/zooms modified later.
+	This file. is safe to open locally, no need to get html from a webserver.
+	Looks for images at http://localhost:8080/
 
 Brandyn White <bwhite@dappervision.com>
 Andrew Miller <amiller@dappervision.com>
