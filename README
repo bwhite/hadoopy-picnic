@@ -1,2 +1,8 @@
+tmsdebug.py:
+	This script runs a server to let you see how openlayers.html sends requests
+	
+openlayer.html:
+	Sample openlayer page, needs to have the resolutions/extents/zooms modified later
+
 Brandyn White <bwhite@dappervision.com>
 Andrew Miller <amiller@dappervision.com>
