@@ -24,14 +24,15 @@ class Mapper(object):
         for y in xrange(ysubtiles):
             for x in xrange(xsubtiles):
                 tile_id = '%.6d_%.6d' % (x / _subtiles_per_tile_length,
-                                       ytiles - y / _subtiles_per_tile_length - 1)
+                                         y / _subtiles_per_tile_length)
                 subtile_id = '%.6d_%.6d' % (x % _subtiles_per_tile_length,
-                                            (ysubtiles - y - 1) % _subtiles_per_tile_length)
+                                            y % _subtiles_per_tile_length)
                 key = '\t'.join((tile_id, subtile_id))
+                yp = ysubtiles - y - 1
                 tile = _target_image.crop((x * _subtile_length,
-                                           y * _subtile_length,
+                                           yp * _subtile_length,
                                            (x + 1) * _subtile_length,
-                                           (y + 1) * _subtile_length))
+                                           (yp + 1) * _subtile_length))
                 self.target_tiles[key] = np.asarray(tile)
 
     @staticmethod
@@ -129,13 +130,16 @@ class Reducer(object):
         self._sub_tiles = {}
         _parse_key_re = re.compile('([0-9]+)_([0-9]+)\t([0-9]+)_([0-9]+)')
         self._parse_key = lambda x: map(int, _parse_key_re.search(x).groups())
+        _target_image = Image.open('target.jpg')
+        self.num_xtiles = _target_image.size[0] / _tile_length
+        self.num_ytiles = _target_image.size[1] / _tile_length
 
     def _find_output(self, key, scale, subtiles_per_tile_len, subtile_len):
         xtile, ytile, xsubtile, ysubtile = self._parse_key(key)
         xouttile = xtile * scale + xsubtile / subtiles_per_tile_len
         youttile = ytile * scale + ysubtile / subtiles_per_tile_len
         xoffset = (xsubtile % subtiles_per_tile_len) * subtile_len
-        yoffset = (ysubtile % subtiles_per_tile_len) * subtile_len
+        yoffset = (subtiles_per_tile_len - (ysubtile % subtiles_per_tile_len) - 1) * subtile_len
         return xouttile, youttile, xoffset, yoffset
 
     def _image_to_str(self, img):

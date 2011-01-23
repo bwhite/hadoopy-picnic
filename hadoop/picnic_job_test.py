@@ -8,7 +8,7 @@ class Test(hadoopy.Test):
 
     def setUp(self):
         self.map_input = []
-        for x in glob.glob('fixtures/*.jpg')[:100]:
+        for x in glob.glob('fixtures/*.jpg'):
             with open(x) as fp:
                 self.map_input.append((x, fp.read()))
 
