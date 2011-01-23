@@ -1,13 +1,15 @@
 import hadoopy
 import Image
 import numpy as np
+import re
 import cStringIO as StringIO
 
 _subtile_length = 16
 _tile_length = 256
 _levels = 4
 _initial_image_size = _subtile_length * 2 ** (_levels - 1)
-_subtiles_per_tile = _tile_length / _subtile_length
+_subtiles_per_tile_length = _tile_length / _subtile_length
+_subtiles_per_tile = _subtiles_per_tile_length * _subtiles_per_tile_length
 
 
 class Mapper(object):
@@ -17,13 +19,14 @@ class Mapper(object):
         self.target_tiles = {}
         xtiles = _target_image.size[0] / _tile_length
         ytiles = _target_image.size[1] / _tile_length
-        xsubtiles = xtiles * _subtiles_per_tile
-        ysubtiles = ytiles * _subtiles_per_tile
+        xsubtiles = xtiles * _subtiles_per_tile_length
+        ysubtiles = ytiles * _subtiles_per_tile_length
         for y in xrange(ysubtiles):
             for x in xrange(xsubtiles):
-                tile_id = '%.6d_%.6d' % (x / _subtiles_per_tile,
-                                       ytiles - y / _subtiles_per_tile - 1)
-                subtile_id = '%.6d_%.6d' % (x, ysubtiles - y - 1)
+                tile_id = '%.6d_%.6d' % (x / _subtiles_per_tile_length,
+                                       ytiles - y / _subtiles_per_tile_length - 1)
+                subtile_id = '%.6d_%.6d' % (x % _subtiles_per_tile_length,
+                                            (ysubtiles - y - 1) % _subtiles_per_tile_length)
                 key = '\t'.join((tile_id, subtile_id))
                 tile = _target_image.crop((x * _subtile_length,
                                            y * _subtile_length,
@@ -98,6 +101,7 @@ class Mapper(object):
         scoring_tile = np.asarray(images[-1])
         # Compute score for each tile position, emit for each (TODO Optimize by
         # only emitting when we know the value is larger than we have seen)
+        # TODO Should probably convert images to jpeg strings
         for key, target_tile in self.target_tiles.items():
             score = self._image_similarity(target_tile, scoring_tile)
             yield key, (score, images)
@@ -122,10 +126,23 @@ def combiner(key, values):
 class Reducer(object):
 
     def __init__(self):
-        self._sub_tiles = []
+        self._sub_tiles = {}
+        _parse_key_re = re.compile('([0-9]+)_([0-9]+)\t([0-9]+)_([0-9]+)')
+        self._parse_key = lambda x: map(int, _parse_key_re.search(x).groups())
 
-    def _is_last_subtile(self, key):
-        pass
+    def _find_output(self, key, scale, subtiles_per_tile_len, subtile_len):
+        xtile, ytile, xsubtile, ysubtile = self._parse_key(key)
+        xouttile = xtile * scale + xsubtile / subtiles_per_tile_len
+        youttile = ytile * scale + ysubtile / subtiles_per_tile_len
+        xoffset = (xsubtile % subtiles_per_tile_len) * subtile_len
+        yoffset = (ysubtile % subtiles_per_tile_len) * subtile_len
+        return xouttile, youttile, xoffset, yoffset
+
+    def _image_to_str(self, img):
+        out = StringIO.StringIO()
+        img.save(out, 'JPEG')
+        out.seek(0)
+        return out.read()
 
     def reduce(self, key, values):
         """
@@ -139,9 +156,29 @@ class Reducer(object):
             key: Tile name
             value: JPEG Image Data
         """
-        self._sub_tiles.append(min(values, key=lambda x: x[0]))
-        if self._is_last_subtile(key):
-            pass  # TODO Build tile and emit
+        self._sub_tiles[key] = min(values, key=lambda x: x[0])[1][::-1]
+        # If we don't have all of the necessary subtiles
+        if len(self._sub_tiles) != _subtiles_per_tile:
+            return
+        for level in range(_levels):
+            # Each image is smaller than the tile
+            scale = 2 ** level
+            subtiles_per_tile_len = _subtiles_per_tile_length / scale
+            subtile_len = _subtile_length * scale
+            cur_subtiles = [(self._find_output(key, scale, subtiles_per_tile_len, subtile_len), images[level])
+                         for key, images in self._sub_tiles.items()]
+            cur_subtiles.sort(key=lambda x: x[0])
+            subtiles_per_tile = subtiles_per_tile_len ** 2
+            cur_tile = Image.new('RGB', (_tile_length, _tile_length))
+            for subtile_ind, ((xouttile, youttile, xoffset, yoffset), image) in enumerate(cur_subtiles):
+                print((xouttile, youttile, xoffset, yoffset))
+                cur_tile.paste(image, (xoffset, yoffset))
+                if not (subtile_ind + 1) % subtiles_per_tile:
+                    tile_name = '%d_%d_%d.jpg' % (level, xouttile, youttile)
+                    yield tile_name, self._image_to_str(cur_tile)
+                    cur_tile = Image.new('RGB', (_tile_length, _tile_length))
+        self._sub_tiles = {}
+
 
 if __name__ == '__main__':
     hadoopy.run(Mapper, Reducer, combiner)
