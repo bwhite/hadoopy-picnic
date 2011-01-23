@@ -33,7 +33,7 @@ class Mapper(object):
                                            yp * _subtile_length,
                                            (x + 1) * _subtile_length,
                                            (yp + 1) * _subtile_length))
-                self.target_tiles[key] = np.asarray(tile)
+                self.target_tiles[key] = np.asfarray(tile)
 
     @staticmethod
     def _image_from_str(s):
@@ -75,7 +75,7 @@ class Mapper(object):
         Returns:
             Float valued distance where smaller means they are more similar
         """
-        return np.sum(img0 - img1)
+        return np.sum(np.abs(img0 - img1))
 
     def map(self, key, value):
         """
@@ -99,7 +99,7 @@ class Mapper(object):
         for layer in range(1, _levels):
             prev_size /= 2
             images.append(images[-1].resize((prev_size, prev_size)))
-        scoring_tile = np.asarray(images[-1])
+        scoring_tile = np.asfarray(images[-1])
         # Compute score for each tile position, emit for each (TODO Optimize by
         # only emitting when we know the value is larger than we have seen)
         # TODO Should probably convert images to jpeg strings
