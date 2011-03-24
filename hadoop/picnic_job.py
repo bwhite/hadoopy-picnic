@@ -1,3 +1,8 @@
+"""Web-scale Mosaic Maker
+
+Files:
+    target.jpg: JPEG file of the target image.
+"""
 import hadoopy
 import Image
 import numpy as np
@@ -10,6 +15,31 @@ _levels = 4
 _initial_image_size = _subtile_length * 2 ** (_levels - 1)
 _subtiles_per_tile_length = _tile_length / _subtile_length
 _subtiles_per_tile = _subtiles_per_tile_length * _subtiles_per_tile_length
+
+
+def _image_to_str(img):
+    """
+    Args:
+        img: PIL Image
+
+    Returns:
+        JPEG string of the data.
+    """
+    out = StringIO.StringIO()
+    img.save(out, 'JPEG')
+    out.seek(0)
+    return out.read()
+
+
+def _image_from_str(s):
+    """
+    Args:
+        s: JPEG image string
+
+    Returns:
+        PIL Image
+    """
+    return Image.open(StringIO.StringIO(s))
 
 
 class Mapper(object):
@@ -36,7 +66,7 @@ class Mapper(object):
                 self.target_tiles[key] = np.asfarray(tile)
 
     @staticmethod
-    def _image_from_str(s):
+    def _crop_image_from_str(s):
         """Load from string, crop to a square, resize to _initial_image_size
 
         Args:
@@ -51,7 +81,7 @@ class Mapper(object):
             IOError: Image is unreadable
         """
         try:
-            img = Image.open(StringIO.StringIO(s))
+            img = _image_from_str(s)
         except IOError, e:
             hadoopy.counter('Stats', 'IMG_BAD')
             raise e
@@ -62,7 +92,8 @@ class Mapper(object):
         if img.mode != 'RGB':
             hadoopy.counter('Stats', 'IMG_WRONG_MODE')
             raise ValueError
-        img = img.crop((0, 0, min_side, min_side))  # TODO: Crop the center instead
+        # TODO: Crop the center instead
+        img = img.crop((0, 0, min_side, min_side))
         return img.resize((_initial_image_size, _initial_image_size))
 
     @staticmethod
@@ -87,11 +118,11 @@ class Mapper(object):
             Tuple of (key, value) where
             key: tile_id\tsubtile_id (easily parsable by the
                 KeyFieldBasedPartitioner)
-            value: (score, images) where images are power of 2 JPEG images
+            value: [score, images] where images are power of 2 JPEG images
                 in descending order by size
         """
         try:
-            images = [self._image_from_str(value)]
+            images = [self._crop_image_from_str(value)]
         except (ValueError, IOError):
             return
         # Keep resizing until we get one for each layer, save them for later use
@@ -100,25 +131,26 @@ class Mapper(object):
             prev_size /= 2
             images.append(images[-1].resize((prev_size, prev_size)))
         scoring_tile = np.asfarray(images[-1])
-        # Compute score for each tile position, emit for each (TODO Optimize by
-        # only emitting when we know the value is larger than we have seen)
-        # TODO Should probably convert images to jpeg strings
+        images = map(_image_to_str, images)  # JPEG's are much smaller
+        # Compute score for each tile position, emit for each
+        # TODO Optimize by only emitting when we know the value is larger than
+        # we have seen)
         for key, target_tile in self.target_tiles.items():
             score = self._image_similarity(target_tile, scoring_tile)
-            yield key, (score, images)
+            yield key, [score, images]
 
 
 def combiner(key, values):
     """
     Args:
         key: (tile_id, subtile_id)
-        values: Iterator of (score, images) where images are power of 2 JPEG
+        values: Iterator of [score, images] where images are power of 2 JPEG
             images in descending order by size
 
     Yields:
         Tuple of (key, value) where
         key: (tile_id, subtile_id)
-        value: (score, images) where images are power of 2 JPEG images
+        value: [score, images] where images are power of 2 JPEG images
             in descending order by size
     """
     yield key, min(values, key=lambda x: x[0])
@@ -142,17 +174,11 @@ class Reducer(object):
         yoffset = (subtiles_per_tile_len - (ysubtile % subtiles_per_tile_len) - 1) * subtile_len
         return xouttile, youttile, xoffset, yoffset
 
-    def _image_to_str(self, img):
-        out = StringIO.StringIO()
-        img.save(out, 'JPEG')
-        out.seek(0)
-        return out.read()
-
     def reduce(self, key, values):
         """
         Args:
         key: (tile_id, subtile_id)
-        values: Iterator of (score, images) where images are power of 2 JPEG
+        values: Iterator of [score, images] where images are power of 2 JPEG
             images in descending order by size
 
         Yields:
@@ -161,6 +187,8 @@ class Reducer(object):
             value: JPEG Image Data
         """
         self._sub_tiles[key] = min(values, key=lambda x: x[0])[1][::-1]
+        # As the images were JPEG, we need to make them PIL again
+        self._sub_tiles[key] = map(_image_from_str, self._sub_tiles[key])
         # If we don't have all of the necessary subtiles
         if len(self._sub_tiles) != _subtiles_per_tile:
             return
@@ -175,11 +203,11 @@ class Reducer(object):
             subtiles_per_tile = subtiles_per_tile_len ** 2
             cur_tile = Image.new('RGB', (_tile_length, _tile_length))
             for subtile_ind, ((xouttile, youttile, xoffset, yoffset), image) in enumerate(cur_subtiles):
-                print((xouttile, youttile, xoffset, yoffset))
+                #print((xouttile, youttile, xoffset, yoffset))
                 cur_tile.paste(image, (xoffset, yoffset))
                 if not (subtile_ind + 1) % subtiles_per_tile:
                     tile_name = '%d_%d_%d.jpg' % (level, xouttile, youttile)
-                    yield tile_name, self._image_to_str(cur_tile)
+                    yield tile_name, _image_to_str(cur_tile)
                     cur_tile = Image.new('RGB', (_tile_length, _tile_length))
         self._sub_tiles = {}
 
